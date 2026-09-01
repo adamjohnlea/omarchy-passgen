@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "adamjohnlea.passgen",
+  "name": "Password Generator",
+  "version": "1.0.0",
+  "author": "Adam John Lea",
+  "license": "MIT",
+  "description": "Generate strong passwords from the bar: five password types, live strength scoring, and a clipboard that clears itself.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Password Generator",
+    "description": "Random, pronounceable, passphrase, PIN, and hex passwords with a self-clearing clipboard.",
+    "category": "Utilities",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "autoClearClipboard": true,
+      "clipboardClearSeconds": 30
+    },
+    "schema": [
+      {
+        "key": "autoClearClipboard",
+        "type": "boolean",
+        "label": "Auto-clear clipboard",
+        "defaultValue": true,
+        "description": "Wipe a copied password from the clipboard after a delay, unless you have copied something else since."
+      },
+      {
+        "key": "clipboardClearSeconds",
+        "type": "integer",
+        "label": "Clear after (seconds)",
+        "min": 5,
+        "max": 600,
+        "step": 5,
+        "defaultValue": 30
+      }
+    ]
+  }
+}

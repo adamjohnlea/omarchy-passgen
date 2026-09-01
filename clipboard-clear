@@ -1,0 +1,16 @@
+#!/bin/bash
+# Clears the Wayland clipboard, but only if it still holds the password given
+# on stdin — so a password the user copied over is never clobbered.
+#
+# The password arrives on stdin and is held in a shell variable rather than
+# passed as an argument: argv is world-readable through /proc.
+
+set -uo pipefail
+
+expected=$(cat)
+[[ -n $expected ]] || exit 0
+
+current=$(wl-paste --no-newline 2>/dev/null || true)
+[[ $current == "$expected" ]] || exit 0
+
+wl-copy --clear

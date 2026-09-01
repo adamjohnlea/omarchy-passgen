@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""Password generator engine for the Omarchy passgen bar widget.
+
+Every random choice goes through `secrets`, the standard library's CSPRNG
+interface. Nothing here touches `random`, which is seeded predictably and
+must never generate a password.
+
+Usable on its own:
+
+    passgen random --length 20 --symbols
+    passgen passphrase --words 5 --separator .
+"""
+
+import argparse
+import os
+import secrets
+import sys
+
+LOWERCASE = "abcdefghijklmnopqrstuvwxyz"
+UPPERCASE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+NUMBERS = "0123456789"
+SYMBOLS = "!@#%^&*()-_=+<>?"
+AMBIGUOUS = "0O1lI|`"
+
+CONSONANTS = [
+    "b", "c", "d", "f", "g", "h", "j", "k", "l", "m", "n", "p", "r", "s",
+    "t", "v", "w", "x", "z",
+    "bl", "br", "ch", "cl", "cr", "dr", "fl", "fr", "gl", "gr", "pl", "pr",
+    "sh", "sk", "sl", "sm", "sn", "sp", "st", "sw", "th", "tr", "tw",
+]
+VOWELS = ["a", "e", "i", "o", "u", "ae", "ea", "ee", "ie", "oo", "ou"]
+
+WORDLIST_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wordlist.txt")
+
+
+def load_wordlist(path=WORDLIST_PATH):
+    with open(path, encoding="utf-8") as handle:
+        return [line.strip() for line in handle if line.strip()]
+
+
+def shuffled(items):
+    """Fisher-Yates using the CSPRNG. `random.shuffle` is not safe here."""
+    out = list(items)
+    for i in range(len(out) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        out[i], out[j] = out[j], out[i]
+    return out
+
+
+def without_ambiguous(chars):
+    return "".join(c for c in chars if c not in AMBIGUOUS)
+
+
+def random_pool(upper, numbers, symbols, exclude_ambiguous):
+    """The character sets in play, as a list of the enabled sets.
+
+    Lowercase is always the base set, matching the macOS app: the chips
+    toggle what is added on top of it.
+    """
+    strip = without_ambiguous if exclude_ambiguous else (lambda c: c)
+    sets = [strip(LOWERCASE)]
+    if upper:
+        sets.append(strip(UPPERCASE))
+    if numbers:
+        sets.append(strip(NUMBERS))
+    if symbols:
+        sets.append(strip(SYMBOLS))
+    return sets
+
+
+def generate_random(length, upper, numbers, symbols, exclude_ambiguous):
+    sets = random_pool(upper, numbers, symbols, exclude_ambiguous)
+    pool = "".join(sets)
+
+    # Seed one character from every enabled set, so a chip that is on is
+    # guaranteed to appear. At most 4 seeds against a minimum length of 8.
+    required = [secrets.choice(s) for s in sets if s]
+    remaining = max(0, length - len(required))
+    filler = [secrets.choice(pool) for _ in range(remaining)]
+    return "".join(shuffled(required + filler))
+
+
+def generate_pronounceable(length, capitalize, numbers):
+    password = ""
+    while len(password) < length:
+        password += secrets.choice(CONSONANTS)
+        if len(password) >= length:
+            break
+        password += secrets.choice(VOWELS)
+
+    password = password[:length]
+    if capitalize and password:
+        password = password[0].upper() + password[1:]
+    if numbers:
+        password += str(10 + secrets.randbelow(90))
+    return password
+
+
+def generate_passphrase(words, separator, capitalize, number, wordlist=None):
+    wordlist = wordlist if wordlist is not None else load_wordlist()
+    chosen = [secrets.choice(wordlist) for _ in range(words)]
+    if capitalize:
+        chosen = [w.capitalize() for w in chosen]
+    passphrase = separator.join(chosen)
+    if number:
+        passphrase += separator + str(10 + secrets.randbelow(990))
+    return passphrase
+
+
+def generate_pin(length, no_repeat):
+    pin = ""
+    last = None
+    for _ in range(length):
+        digit = secrets.choice(NUMBERS)
+        while no_repeat and digit == last:
+            digit = secrets.choice(NUMBERS)
+        pin += digit
+        last = digit
+    return pin
+
+
+def generate_hex(length, upper):
+    alphabet = "0123456789ABCDEF" if upper else "0123456789abcdef"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+def bounded(value, low, high):
+    return max(low, min(high, value))
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="passgen",
+        description="Generate a password. All randomness comes from the system CSPRNG.",
+    )
+    parser.add_argument("-n", "--count", type=int, default=1,
+                        help="how many passwords to print (default: 1)")
+    subs = parser.add_subparsers(dest="type", required=True)
+
+    def flag(target, name, default, help_on, help_off):
+        group = target.add_mutually_exclusive_group()
+        group.add_argument(f"--{name}", dest=name.replace("-", "_"),
+                           action="store_true", default=default, help=help_on)
+        group.add_argument(f"--no-{name}", dest=name.replace("-", "_"),
+                           action="store_false", help=help_off)
+
+    rnd = subs.add_parser("random", help="fully random characters")
+    rnd.add_argument("--length", type=int, default=12, help="8-32 (default: 12)")
+    flag(rnd, "upper", True, "include A-Z", "omit A-Z")
+    flag(rnd, "numbers", True, "include 0-9", "omit 0-9")
+    flag(rnd, "symbols", True, "include !@#%%^&*()-_=+<>?", "omit symbols")
+    rnd.add_argument("--exclude-ambiguous", action="store_true",
+                     help="drop 0 O 1 l I | ` from every set")
+
+    pro = subs.add_parser("pronounceable", help="syllable patterns you can say")
+    pro.add_argument("--length", type=int, default=12, help="6-32 (default: 12)")
+    flag(pro, "capitalize", True, "capitalize the first letter", "leave lowercase")
+    flag(pro, "numbers", True, "append two digits", "no trailing digits")
+
+    phr = subs.add_parser("passphrase", help="words from the built-in list")
+    phr.add_argument("--words", type=int, default=4, help="3-8 (default: 4)")
+    phr.add_argument("--separator", default="-", help="joiner (default: -)")
+    flag(phr, "capitalize", True, "capitalize each word", "leave words lowercase")
+    flag(phr, "number", False, "append a number", "no trailing number")
+
+    pin = subs.add_parser("pin", help="digits only")
+    pin.add_argument("--length", type=int, default=6, help="4-12 (default: 6)")
+    flag(pin, "no-repeat", True, "never repeat a digit back to back",
+         "allow consecutive repeats")
+
+    hexp = subs.add_parser("hex", help="hexadecimal string")
+    hexp.add_argument("--length", type=int, default=16, help="8-64 (default: 16)")
+    flag(hexp, "upper", True, "A-F", "a-f")
+
+    return parser
+
+
+def generate(args):
+    if args.type == "random":
+        return generate_random(bounded(args.length, 8, 32), args.upper,
+                               args.numbers, args.symbols, args.exclude_ambiguous)
+    if args.type == "pronounceable":
+        return generate_pronounceable(bounded(args.length, 6, 32),
+                                      args.capitalize, args.numbers)
+    if args.type == "passphrase":
+        return generate_passphrase(bounded(args.words, 3, 8), args.separator,
+                                   args.capitalize, args.number)
+    if args.type == "pin":
+        return generate_pin(bounded(args.length, 4, 12), args.no_repeat)
+    if args.type == "hex":
+        return generate_hex(bounded(args.length, 8, 64), args.upper)
+    raise ValueError(f"unknown type {args.type!r}")
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    for _ in range(max(1, args.count)):
+        print(generate(args))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
