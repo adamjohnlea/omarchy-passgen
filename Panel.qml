@@ -114,6 +114,10 @@ Panel {
   function copyPassword() {
     if (root.password === "") return
     copier.running = false
+    // onStarted sets stdinEnabled false to signal EOF, which sticks. Without
+    // re-arming it here the write is dropped and every copy after the first
+    // silently does nothing.
+    copier.stdinEnabled = true
     copier.running = true
   }
 
@@ -238,6 +242,7 @@ Panel {
     onTriggered: {
       if (root.copiedPassword === "") return
       clearer.running = false
+      clearer.stdinEnabled = true
       clearer.running = true
     }
   }
